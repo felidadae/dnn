@@ -1,0 +1,7 @@
+*.pyc
+__results/*
+*.png
+*.gz
+*.ipynb
+.ipynb_checkpoints/*
+.idea/*
