@@ -1,5 +1,7 @@
 
 import numpy
+import PIL.Image
+import PIL.ImageOps
 
 
 
@@ -27,6 +29,7 @@ def scale_to_unit_interval(ndar, eps=1e-8):
     ndar -= ndar.min()
     ndar *= 1.0 / (ndar.max() + eps)
     return ndar
+
 
 
 def tile_raster_images(X, img_shape, tile_shape, tile_spacing=(0, 0),
@@ -149,6 +152,8 @@ def tile_raster_images(X, img_shape, tile_shape, tile_spacing=(0, 0),
                     ] = this_img * c
         return out_array
 
+
+
 def seperateLine(before = False, after = False):
         if before == True:
             print '\n'
@@ -156,21 +161,32 @@ def seperateLine(before = False, after = False):
         if after == True:
             print '\n'
 
-def prettyPrintDictionary(dict, tabsNum = 1):
+def prettyPrintDictionary(dict, tabsNum = 0):
     keys = dict.keys()
     values = dict.values()
     N = len(keys)
     for i in xrange(N):
         print "\t", keys[i], ": ", values[i]
 
-def prettyPrintDictionaryToString(title, dict, tabsNum = 1):
+def prettyPrintDictionaryToString(title, dict, tabsNum = 0):
+    tabs = ''
+    for i in xrange(tabsNum):
+        tabs += '\t'
+    #
     keys = dict.keys()
     values = dict.values()
     N = len(keys)
     sums = ""
-    sums += title + ":\n"
+    sums += tabs + title + ":\n"
     for i in xrange(N):
-        sums+= "\t" + str(keys[i]) + ": " + str(values[i]) + "\n"
+        if not (type(values[i]) == type({})):
+            sums+= \
+                tabs + "\t" + str(keys[i]) \
+                + ": " + str(values[i]) + "\n"
+        else:
+            sums+= \
+                prettyPrintDictionaryToString\
+                (str(keys[i]), values[i], tabsNum+1)
     return sums
 
 def printDictionaryAsOneString(dict, seperatorOfParis = "__"):
@@ -184,3 +200,57 @@ def printDictionaryAsOneString(dict, seperatorOfParis = "__"):
 def getTimeID():
     import time
     return time.strftime("%d-%m-%Y")+'__'+time.strftime("%H-%M-%S")
+
+
+
+def PIL2array(img):
+    numpy_img =  numpy.array(img.getdata(),
+                    numpy.float32).reshape(img.size[1], img.size[0])
+    numpy_img = numpy_img/255.0
+    return numpy_img
+
+def showSmallSadTree(trees, itree, D_tree):
+    imgPIL = PIL.Image.frombuffer("F", (D_tree[0],D_tree[1]), trees[itree])
+    imgPIL.show()
+
+def readImageIntoNumpyArray(path):
+    im = PIL.Image.open(path)
+    im = im.convert("F")
+    #print im.format, im.size, im.mode
+    #print im.size[0]/28, im.size[1]/28, im.size[0]/28 * im.size[1]/28
+
+    numpy_im = PIL2array(im)
+    numpy_im.shape
+
+    return numpy_im
+
+def prepareSmallTrees(path, D_tree, N_tree):
+    img = readImageIntoNumpyArray(path)
+
+    rng = numpy.random.RandomState(123)
+    x_trees = rng.randint(0, img.shape[0]-D_tree[0], N_tree)
+    y_trees = rng.randint(0, img.shape[1]-D_tree[1], N_tree)
+    L_tree = D_tree[0] * D_tree[1]
+
+    trees = numpy.zeros(shape=(N_tree, L_tree), dtype=numpy.float32)
+    for itree in xrange(N_tree):
+        x_tree = x_trees[itree]
+        y_tree = y_trees[itree]
+        trees[itree] = img[ x_tree:x_tree+D_tree[0] ][:, y_tree:y_tree+D_tree[1]].reshape(L_tree)
+    return trees
+
+def mixTwoSets(base, distractor, K_distract):
+    N = base.shape[0]
+    N_distract = int(K_distract * N)
+
+    mix = base.copy()
+
+    import random
+    random_list = random.sample(xrange(N), N_distract)
+
+    idistractor = 0
+    for imix in xrange (N_distract):
+        mix[ random_list[imix] ] = distractor[random_list[imix]]
+        idistractor += 1
+
+    return mix

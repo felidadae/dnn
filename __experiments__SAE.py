@@ -1,136 +1,189 @@
 import time
 
 import os
-import numpy
+import numpy as np
 import theano.tensor as T
 from theano.tensor.shared_randomstreams import RandomStreams
 
-from NNBP import randW, zerosW, zerosBias
+from _data import mnist_load, prepareExamplesAsShared
+from _results import \
+    pickleResultsGen, unpickleResultsGen,\
+    costPlot, mnist_visualise, weightsAsFilters
+from _utils import \
+    prettyPrintDictionary, prettyPrintDictionaryToString, \
+    getTimeID, seperateLine, prepareSmallTrees
+
 from SAE import SAE
-
-from _data import mnist_load
-from _results import pickleResultsGen, unpickleResultsGen, plotConfusionMatrix, testCost_validError_relationPlot, costPlot, mnist_visualise
-from _utils import prettyPrintDictionary, prettyPrintDictionaryToString, getTimeID, seperateLine
+from NNBP import randW, zerosBias
 
 
+def learn(path, meta_params, dataset):
+    m = meta_params
+    d = dataset
 
-def sae__learn_earlystopping(experiment_path, meta_params, dataset_info):
-    N_epoch                 = meta_params["N_epoch"]
-    N_epoch_pretrain        = meta_params["N_epoch_pretrain"]
-    batch_size              = meta_params["batch_size"]
-    learning_rate           = meta_params["learning_rate"]
-    pretrain_rate           = meta_params["pretrain_rate"]
-    valid_epoch_frequency   = meta_params["valid_epoch_frequency"]
-    n_hl                    = meta_params["n_hl"]
-    corruption_levels       = meta_params["corruption_levels"]
-
-
-    #######
-    #Load data
-    #######
-    print '... loading data'
-    dataset  = mnist_load()
-    n_batches = {"train": (dataset["train"]["N"]) / batch_size, "valid": (dataset["valid"]["N"]) / batch_size, "test": (dataset["test"]["N"]) / batch_size}
+    rng    = m['rng']
+    T_rng  = m['T_rng']
+    NB = \
+        {'pt'   : d['shr']['pt']   ['N'] / m['pt']['B'],
+         'ft_tr': d['shr']['ft_tr']['N'] / m['ft']['B'],
+         'ft_v' : d['shr']['ft_v'] ['N'] / m['ft']['B'],
+         'te'   : d['shr']['te']   ['N'] / m['ft']['B']}
 
 
     #######
     #Build the model
     #######
     print '... building the model'
-    ibatch = T.lscalar()
+    ib = T.lscalar()
     x = T.matrix('x')
-    N_x = dataset_info["N_x"]
     y = T.ivector('y')
-    N_y = dataset_info["N_y"]
-    g = T.nnet.sigmoid
-    o = T.nnet.softmax
-    ae_g = ae_o = T.nnet.sigmoid
 
-    rng = numpy.random.RandomState(1234)
-    theano_rng = RandomStreams(rng.randint(2 ** 30))
-    initParamsFun = {"W_hl": randW, "b_hl": zerosBias, "W_ol": zerosW, "b_ol": zerosBias}
-    sae = SAE( (x, N_x, y, N_y, n_hl, g, o, rng, initParamsFun), (theano_rng, ae_g, ae_o) )
+    sae = SAE( (x, d['Nx'], y, d['Ny'], m['n_hl'], m['ft']['g'],
+                m['ft']['o'], rng, m['ft']['initP']),
+               (T_rng, m['pt']['g'], m['pt']['o']) )
 
-    funs__pretrain = sae.compilePreTrainFunctions(x, dataset, ibatch, batch_size, pretrain_rate, corruption_levels)
-    fun__finetune__train, fun__finetune__valid, fun__finetune__test = sae.compileFineTuneFunction(dataset, ibatch, batch_size, learning_rate)
+    #Pretrain
+    funs__pretrain = \
+        sae.compile__pt(x, d['shr']['pt']['X'], ib,
+        m['pt']['B'], m['pt']['K'], m['pt']['corrupt'])
 
-
-    #######
-    #Pre-train
-    #######
-    print '... pretraining'
-    cost_aes   = numpy.zeros((sae.nnbp.L, N_epoch_pretrain), dtype=float)
-    x_r_final  = numpy.zeros((sae.nnbp.L, dataset["train"]["N"], N_x), dtype=dataset["train"]["X"].get_value(borrow=True).dtype)
-    x_c_final  = numpy.zeros((sae.nnbp.L, dataset["train"]["N"], N_x), dtype=dataset["train"]["X"].get_value(borrow=True).dtype)
-
-    start_time = time.clock()
-    for ilayer in xrange(sae.nnbp.L):
-        print 'Pretrain layer %d' % ilayer
-        for iepoch in xrange(N_epoch_pretrain):
-            if iepoch < N_epoch-1:
-                for _ibatch in xrange(n_batches["train"]):
-                    cost, _, _ = funs__pretrain[ilayer](_ibatch)
-                    cost_aes[ilayer][iepoch] += cost
-            else:
-                for _ibatch in xrange(n_batches["train"]):
-                    cost, x_r_part, x_c_part = funs__pretrain[ilayer](_ibatch)
-                    #x_r_final[ilayer][_ibatch*batch_size:(_ibatch+1)*batch_size] = x_r_part
-                    #x_c_final[ilayer][_ibatch*batch_size:(_ibatch+1)*batch_size] = x_c_part
-                    cost_aes[ilayer][iepoch] += cost
-            print 'Training epoch %d, cost ' % iepoch, cost_aes[ilayer][iepoch]
-    end_time = time.clock()
-    pretraining_time = end_time - start_time
-    print '\nPretraining complete.' + 'Ran for %.2fm' % (pretraining_time / 60.)
-    aes_params_numpy = []
-    for ilayer in xrange(sae.nnbp.L):
-        aes_params_numpy.append (sae.aes[ilayer].W_hl.get_value(borrow=True))
-
-
-    #######
     #Fine-tune
+    fun__ft__tr, fun__ft__v, fun__te = \
+        sae.compile__ft(d['shr'], ib, m['ft']['B'], m['ft']['K'])
+
+
+    #
+    ###
     #######
-    print '... fine-tuning'
-    cost_test   = numpy.zeros((N_epoch), dtype=float)
-    error_valid = numpy.zeros((N_epoch/valid_epoch_frequency), dtype=int)
+    #Pretraining
+    #######
+    ###
+    #
+    def print__pt_cost(ie, il, cost):
+        print 'pretraining layer %d epoch %d, \n\tcost %f' % (il, ie, cost)
 
-    start_time = time.clock()
-    ivalid = 0
-    iepoch = 0
-    ifShouldEarlyStop = False
-    while iepoch < N_epoch and ifShouldEarlyStop == False:
-        for _ibatch in xrange(n_batches["train"]):
-            cost_test[iepoch] += fun__finetune__train(_ibatch)
+    print '... pretraining'
+    cost_pt   = np.zeros((sae.nnbp.L, m['pt']['Ne']), dtype=float)
+    #type = d['shr']['pt']['X'].get_value(borrow=True).dtype
+    #x_r_final  = np.zeros((sae.nnbp.L, d['shr']['pt']['N'], d['Nx']), dtype=type)
+    #x_c_final  = np.zeros((sae.nnbp.L, d['shr']['pt']['N'], d['Nx']), dtype=type)
 
-        last_error_valid = 0
-        if iepoch % valid_epoch_frequency == 0:
-            for _ibatch in xrange(n_batches["valid"]):
-                error_valid[ivalid] += fun__finetune__valid(_ibatch)
-            last_error_valid = error_valid[ivalid]
-            if iepoch > 5 and ivalid > 0 and error_valid[ivalid] > error_valid[ivalid - 1] and error_valid[ivalid-1] > error_valid[ivalid - 2]:
-                ifShouldEarlyStop = True
+    beg_t = time.time()
+
+    for il in xrange(sae.nnbp.L):
+        for ie in xrange(m['pt']['Ne']):
+            if ie < m['pt']['Ne']-1:
+                for _ib in xrange(NB['pt']):
+                    cost, _, _ = funs__pretrain[il](_ib)
+                    cost_pt[il][ie] += cost
             else:
-                ivalid += 1
+                for _ib in xrange(NB['pt']):
+                    cost, x_r_part, x_c_part = funs__pretrain[il](_ib)
 
-        print 'Epoch %d complete.' % (iepoch)
-        print 'Cost_test: %d, error_valid: %f%%' % (cost_test[iepoch],  float(last_error_valid)/float(n_batches["valid"]*batch_size) * 100)
-        iepoch += 1
-    end_time = time.clock()
+                    #_id_beg = _ib*m['pt']['B']
+                    #_id_end = (_ib+1)*m['pt']['B']
+                    #x_r_final[il,_id_beg:_id_end,:] = x_r_part
+                    #x_c_final[il,_id_beg:_id_end,:] = x_c_part
 
-    finetuning_time = end_time - start_time
-    print 'Optimization complete.' + 'Ran for %.2fm' % ((finetuning_time) / 60.)
+                    cost_pt[il][ie] += cost
+
+            print__pt_cost(ie,il,  cost_pt[il][ie])
+
+    end_t = time.time()
+    pt_t = end_t - beg_t
+    print 'Pretraining complete.' + 'Ran for %.2fm\n' % (pt_t / 60.)
+
+    #Save params of aes
+    aes_params_np = []
+    for il in xrange(sae.nnbp.L):
+        #We must copy arrays, because their values will change
+        aes_params_np.append (sae.aes[il].W_hl.get_value(borrow=True).copy())
 
 
+    #
+    ###
     #######
-    #Test on not-seen data
+    #Fine-tuning
     #######
-    print '... testing on not-seen data'
-    error_test = 0
-    y_pred = numpy.array([])
-    for _ibatch in xrange(n_batches["test"]):
-        errors_, y_pred_ = fun__finetune__test(_ibatch)
-        error_test += errors_
-        y_pred = numpy.concatenate((y_pred, y_pred_), axis=0)
-    print 'error_test: %f%%' % (float(error_test)/float(n_batches["test"]*batch_size) * 100)
+    ###
+    #
+    def print__ft_costerror(ie, cost_tr, error_v):
+        print 'finetuning epoch %d,' % ie
+        print '\taverage per sample: cost_train: %f, error_valid: %f%%' % \
+            (float(cost_tr)/float(d['shr']['ft_tr']['N']) * 100,
+             float(error_v)/float(d['shr']['ft_v' ]['N']) * 100)
+
+    print '... fine-tuning'
+    best__nnmp_params_np  = []
+    best__error_ft_v = float('Inf')
+    patience_max = 10
+    patience = patience_max
+
+    cost_ft_tr = np.zeros((m['ft']['Ne']), dtype=float)
+    error_ft_v = np.zeros((m['ft']['Ne']/m['ft']['VF']), dtype=int)
+
+    beg_t = time.time()
+    iv = 0
+    ie = 0
+    estop = False
+
+    while ie < m['ft']['Ne'] and estop == False:
+        for _ib in xrange(NB['ft_tr']):
+            cost_ft_tr[ie] += fun__ft__tr(_ib)
+
+        if ie % m['ft']['VF'] == 0:
+            for _ib in xrange(NB['ft_v']):
+                error_ft_v[iv] += fun__ft__v(_ib)
+
+            if error_ft_v[iv] < best__error_ft_v:
+                print 'New best model.'
+                patience = patience_max
+                best__error_ft_v = error_ft_v[iv]
+                best__nnmp_params_np = []
+                for i in xrange(len(sae.nnbp.params)):
+                    best__nnmp_params_np.append(
+                        sae.nnbp.params[i].get_value(borrow=True))
+
+            else:
+                if patience == 0:
+                    estop = True
+                    print 'Early stop set to true.'
+                else:
+                    patience -= 1
+
+
+        print__ft_costerror(ie, cost_ft_tr[ie], error_ft_v[iv])
+        ie += 1
+        iv+=1
+
+    end_t = time.time()
+
+    ft_t = end_t - beg_t
+    print 'Fine-tuning complete.' + ' Ran for %.2fm\n' % ((ft_t) / 60.)
+
+
+    #
+    ###
+    #######
+    #Testing on non-seen data
+    #######
+    ###
+    #
+
+    #set best model params as current ones
+    for i in xrange(len(best__nnmp_params_np)):
+        sae.nnbp.params[i].set_value(best__nnmp_params_np[i])
+
+    print '... testing best model on not-seen data'
+    error_te = 0
+    y_pred = np.array([])
+    for _ib in xrange(NB['te']):
+        errors_, y_pred_ = fun__te(_ib)
+        error_te += errors_
+        y_pred = np.concatenate((y_pred, y_pred_), axis=0)
+    error_te_perc = float(error_te)/float(d['shr']['te']['N']) * 100
+    print 'error_test: %f%%\n' % (error_te_perc)
+
 
     #######
     #Save results to files (pickling)
@@ -138,44 +191,91 @@ def sae__learn_earlystopping(experiment_path, meta_params, dataset_info):
     print '... preparing results files :)'
 
     #Create info txt file
-    infoFile = open(experiment_path + "/" + "info.txt", 'w')
-    infoFile.write( "classification_method_name: stacked autoencoders; neural network with back-propagation, weights initialised in a greedy way with autoencoders (early stopping)\n")
-    infoFile.write( prettyPrintDictionaryToString("meta_params",  meta_params  ) )
-    infoFile.write("\n")
-    infoFile.write( prettyPrintDictionaryToString("dataset_info", dataset_info ) )
-    infoFile.write("\n")
-    infoFile.write( prettyPrintDictionaryToString("learning_info", {"error_test[%]": (float(error_test))/(float(dataset["test"]["N"]))*100, "learning_time [minutes]": (finetuning_time+pretraining_time)/60., "N_epoch_actual": iepoch}) )
-    infoFile.close()
+
+    def createInfoFile(experiment_path, meta_params, dataset_info,
+        error_test, dataset, finetuning_time, pretraining_time, iepoch):
+        #Create info txt file
+        infoFile = open(experiment_path + '/' + 'info.txt', 'w')
+        infoFile.write(
+            'classification_method_name: stacked autoencoders; \
+            \n\tneural network with back-propagation, weights initialised in a \
+            \n\tgreedy way with autoencoders (early stopping).\n')
+        infoFile.write( prettyPrintDictionaryToString('meta_params',  meta_params  ) )
+        infoFile.write('\n')
+        infoFile.write( prettyPrintDictionaryToString('dataset_info', dataset_info ) )
+        infoFile.write('\n')
+        error_test_percent = (float(error_test))/(float(dataset['te']['N']))*100
+        learning_time_minutes = (finetuning_time+pretraining_time)/60.
+        infoFile.write( prettyPrintDictionaryToString('learning_info',
+            {'error_test[%]': error_test_percent,
+             'learning_time [minutes]': learning_time_minutes,
+             'N_epoch_actual': iepoch}) )
+        infoFile.close()
+
+    createInfoFile(path, m, d, error_te, d['shr'], ft_t, pt_t, ie)
 
     #pickle results
-    pickleResultsGen(experiment_path + "/" + "infoPickled", [dataset_info, meta_params])
-    nnmp_params_numpy = []
-    for i in xrange(sae.nnbp.L+1):
-        nnmp_params_numpy.append (sae.nnbp.params[i].get_value(borrow=True))
-    results = {"cost_aes": cost_aes,
-               "x_r_final": x_r_final,
-               "x_c_final": x_c_final,
-               "pretraining_time": pretraining_time,
+    def pickleThatResults(
+        experiment_path, meta_params,
+        error_test, finetuning_time, pretraining_time, iepoch,
+        cost_aes,
+        #x_r_final, x_c_final,
+        cost_test, error_valid, y_pred,
+        aes_params_np, nnmp_params_np):
 
-               "cost_test": cost_test,
-               "error_valid": error_valid,
-               "error_test": error_test,
-               "y_pred": y_pred,
-               "finetuning_time": finetuning_time,
+        pickleResultsGen(experiment_path + '/' + 'infoPickled', [meta_params])
 
-               "learning_time": finetuning_time+pretraining_time,
-               "aes_params_numpy": aes_params_numpy,
-               "nnmp_params_numpy": nnmp_params_numpy,
-               "N_epoch_actual": iepoch}
-    pickleResultsGen(  experiment_path + "resultsPickled",  [dataset_info, meta_params, results] )
+        #######
+        #RESULTS Dictionary
+        ######$
+        results = \
+            {'cost_aes': cost_aes,
+            #'x_r_final': x_r_final,
+            #'x_c_final': x_c_final,
+            'aes_params_np': aes_params_np,
+            'pretraining_time': pretraining_time,
+            ##
+            'cost_test': cost_test,
+            'error_valid': error_valid,
+            'error_test': error_test,
+            'y_pred': y_pred,
+            'nnmp_params_np': nnmp_params_np,
+            'finetuning_time': finetuning_time,
+            ##
+            'learning_time': finetuning_time+pretraining_time,
+            'N_epoch_actual': iepoch}
 
-def sae__results(experiment_path):
+        pickleResultsGen(experiment_path + 'resultsPickled',
+            [meta_params, results] )
+
+    pickleThatResults(
+        path, m,
+        error_te, ft_t, pt_t, ie,
+        cost_pt, #x_r_final, x_c_final,
+        cost_ft_tr, error_ft_v, y_pred,
+        aes_params_np, best__nnmp_params_np)
+
+
+def run(meta_params, dataset_info, folderName=''):
+    experimentID = getTimeID()
+
+    #Create Folder
+    if folderName != '':
+        folderName = '/'+folderName
+    pathToMainDirectory = '__results/sae' + folderName
+    pathToExperimentDirectory = pathToMainDirectory +'/'+ experimentID
+    os.makedirs(pathToExperimentDirectory)
+
+    #Run
+    learn(pathToExperimentDirectory+'/', meta_params, dataset_info)
+
+def analise(experiment_path):
     dataset  = mnist_load(ifTheanoTensorShared=False)
-    meta_params, results  = unpickleResultsGen(experiment_path + "/resultsPickled")
-    cost           = results["cost"]
-    x_r_final       = results["x_r_final"]
-    ae_params_numpy = results["ae_params_numpy"]
-    W_hl,b_hl = ae_params_numpy
+    meta_params, results  = unpickleResultsGen(experiment_path + '/resultsPickled')
+    cost           = results['cost']
+    x_r_final       = results['x_r_final']
+    ae_params_np = results['ae_params_np']
+    W_hl,b_hl = ae_params_np
 
     #PrintDescription (name of dataset)(N_train, N_valid, N_test)(N_epoch, batch_size, learning_rate, valid_epoch_frequency)
     seperateLine(before=True)
@@ -186,38 +286,127 @@ def sae__results(experiment_path):
     seperateLine(after=True)
 
     #Learning plot: cost(ibatch)
-    costPlot(cost, experiment_path + "/costplot.pdf")
+    costPlot(cost, experiment_path + '/costplot.pdf')
 
     #Show predicted images
-    mnist_visualise ( dataset["train"]["X"],    (0, 500), "ORIGINAL",       experiment_path + "/originalSet.png"        )
-    mnist_visualise ( results["x_c_final" ],    (0, 500), "CORRUPTED",      experiment_path + "/corruptedSet.png"       )
-    mnist_visualise ( x_r_final,                (0, 500), "RECONSTRUCTED",  experiment_path + "/reconstructedSet.png"   )
+    mnist_visualise ( dataset['tr']['X'],    (0, 500), 'ORIGINAL',       experiment_path + '/originalSet.png'        )
+    mnist_visualise ( results['x_c_final' ],    (0, 500), 'CORRUPTED',      experiment_path + '/corruptedSet.png'       )
+    mnist_visualise ( x_r_final,                (0, 500), 'RECONSTRUCTED',  experiment_path + '/reconstructedSet.png'   )
 
-    #Filters from weights
-    mnist_visualise(  W_hl.T, (0,meta_params["N_hl"]), "Weights as filters (W_hl.T)", experiment_path + "/weightsAsFilters.png")
-    #weightsAsFilters(W_hl.T, experiment_path + "/weightsAsFilters2.png")
+    #Filters from weightse
+    mnist_visualise(  W_hl.T, (0,meta_params['N_hl']), 'Weights as filters (W_hl.T)', experiment_path + '/weightsAsFilters.png')
+    weightsAsFilters(W_hl.T, experiment_path + '/weightsAsFilters2.png')
 
 
-def runExperiments():
-    meta_params = {"N_epoch": 500, "N_epoch_pretrain": 50, "batch_size": 32, "learning_rate": 0.01, "pretrain_rate":0.01, "valid_epoch_frequency": 1, "n_hl": [1000, 1000, 1000],
-                   "corruption_levels": [0.3, 0.35, 0.35]}
-    datasetInfo = {"name": "mnist", "load_fun": mnist_load, "N_x": 28*28, "N_y": 10}
-    runExperiment(meta_params=meta_params, datasetInfo=datasetInfo)
+def performExperiment__pretrainInfluence():
+    ###########
+    #Load data
+    ###########
+    original_mnist_shared = mnist_load()
+    nist_letters = unpickleResultsGen("__utils/smallHappyLetters")
+    nist_letters = nist_letters/255.
+    nist_letters = nist_letters[0:50000,:]
+    pretrain_train = nist_letters
+    #    np.concatenate(
+    #        (original_mnist_shared['train']['X'].get_value(borrow=True).copy(),
+    #         nist_letters), 0 )
+    np.random.shuffle(pretrain_train)
+    pretrain_train_shared = \
+        {'X': prepareExamplesAsShared(pretrain_train),
+        'N':  pretrain_train.shape[0]}
 
-def runExperiment(meta_params, datasetInfo):
-    experimentID = getTimeID()
 
-    #Create Folder
-    pathToMainDirectory = "__results/sae"
-    pathToExperimentDirectory = pathToMainDirectory +'/'+ experimentID
-    os.makedirs(pathToExperimentDirectory)
+    ###########
+    #Random number generator
+    ###########
+    rng = np.random.RandomState(9211)
+    T_rng = RandomStreams(rng.randint(2 ** 12+5))
 
+
+    ###########
+    #Prepare default meta_params
+    ###########
+    initP = \
+        {'W_hl': randW,
+        'b_hl' : zerosBias,
+        'W_ol' : randW,
+        'b_ol' : zerosBias}
+
+    meta_params = \
+        {'n_hl': [500, 500, 500],
+        'pt':
+            {'g': T.nnet.sigmoid,
+            'o':  T.nnet.sigmoid,
+            'corrupt': [0.3, 0.3, 0.3],
+            ###
+            'Ne': 15,
+            'initP': initP,
+            'B': 1,
+            'K': 0.01},
+        'ft':
+            {'g': T.nnet.sigmoid,
+            'o':  T.nnet.softmax,
+            ###
+            'Ne': 500,
+            'initP': initP,
+            'B': 1,
+            'K': 0.01,
+            'VF': 1},
+        'rng': rng,
+        'T_rng': T_rng}
+
+
+    dataset_info = \
+        {'shr':
+             {'pt':     original_mnist_shared['train'],
+              'ft_tr':  original_mnist_shared['train'],
+              'ft_v' :  original_mnist_shared['valid'],
+              'te':     original_mnist_shared['test' ]},
+         'Nx': 784,
+         'Ny': 10}
+
+
+    #
+    ###
     #######
-    #Run experiment
+    #run
     #######
-    sae__learn_earlystopping(pathToExperimentDirectory+"/", meta_params, datasetInfo)
+    ###
+    #
+    #folderName = '500_500_500__'
+    #meta_params['pt']['Ne'] = 0
+    #for i in xrange(10):
+    #    run(meta_params, dataset_info, folderName)
+
+    #folderName = '900_500_500__04_035_035__20__pretrain_standard'
+    #meta_params['n_hl'] = [900,500,500]
+    #meta_params['pt']['corrupt'] = [0.4, 0.35, 0.35]
+    #meta_params['pt']['Ne'] = 20
+    #meta_params['ft']['Ne'] = 1000
+    #for i in xrange(10):
+    #    run(meta_params, dataset_info, folderName)
+
+    #folderName = '500_500_500_pretrain_onlyletters'
+    #meta_params['pt']['Ne'] = 15
+    #meta_params['ft']['Ne'] = 1000
+    #dataset_info['shr']['pt'] = pretrain_train_shared
+    #for i in xrange(8):
+    #    run(meta_params, dataset_info, folderName)
+
+    folderName = '500_'
+    meta_params['pt']['Ne'] = 0
+    for i in xrange(10):
+        run(meta_params, dataset_info, folderName)
+
+
+
+
+
+
+
 
 
 
 if __name__ == '__main__':
-    runExperiments()
+    performExperiment__pretrainInfluence()
+    #analise('__results/sae/distraction_influence_01/25-05-2015__23-48-36')

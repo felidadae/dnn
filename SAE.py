@@ -23,14 +23,21 @@ class SAE:
             ae__W_hl    = self.nnbp.hiddenLayers[ilayer].W
             ae__b_hl    = self.nnbp.hiddenLayers[ilayer].b
             ae__b_ol    = None
-            self.aes.append(AE(ae__x, ae__N_x, ae__N_hl, ae__g, ae__o, ae__rng, ae__theano_rng, ae__initParamsFun, ae__W_hl, ae__b_hl, ae__b_ol))
+            self.aes.append(
+                AE(ae__x, ae__N_x, ae__N_hl, ae__g, ae__o, ae__rng,
+                   ae__theano_rng, ae__initParamsFun, ae__W_hl,
+                   ae__b_hl, ae__b_ol))
 
-    def compilePreTrainFunctions(self, x_image_global, dataset, ibatch, batch_size, pretraining_rate, corruption_levels):
+    def compile__pt(self, x_image_global, examples, ib, B, K, corrupt):
         preTrainFuns = []
         for ilayer in xrange(self.nnbp.L):
-            preTrainFuns.append(  self.aes[ilayer].compileFunctions(x_image_global, dataset, ibatch, batch_size, pretraining_rate, corruption_levels[ilayer])  )
+            preTrainFuns.append(
+                self.aes[ilayer].compileFunctions(
+                    x_image_global, examples, ib, B,
+                    K, corrupt[ilayer])  )
         return preTrainFuns
 
-    def compileFineTuneFunction(self, dataset, ibatch, batch_size, learning_rate):
-        return self.nnbp.compileFunctions(dataset, ibatch, batch_size, learning_rate)
+    def compile__ft(self, shr, ib, B, K):
+        dataset = {"train": shr["ft_tr"], "valid": shr["ft_v"], "test": shr["te"]}
+        return self.nnbp.compileFunctions(dataset, ib, B, K)
 

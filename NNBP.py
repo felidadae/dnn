@@ -61,10 +61,7 @@ class OutputLayer(object):
         self.f = o(T.dot(h_p,W) + b)
 
 class NNBP(object):
-    """
-    Back propagation multilayer neural network
-    """
-    def __init__(self, x, N_x, y, N_y, n_hl, g, o, rng, initParamsFun):
+    def __init__(self, x, N_x, y, N_y, n_hl, g, o, rng, initP):
         self.x = x
         self.y = y
 
@@ -81,29 +78,32 @@ class NNBP(object):
                 N_h_p = n_hl[ih-1]
                 N_h  = n_hl[ih]
                 h_p = self.hiddenLayers[ih-1].h
-            W = initParamsFun["W_hl"](rng, N_h_p, N_h, g)
-            b = initParamsFun["b_hl"](N_h)
+            W = initP["W_hl"](rng, N_h_p, N_h, g)
+            b = initP["b_hl"](N_h)
             self.params.append(W)
             self.params.append(b)
-            layer = HiddenLayer(h_p, N_h_p, N_h, W, b, T.nnet.sigmoid )
+            layer = \
+                HiddenLayer(h_p, N_h_p, N_h, W, b, T.nnet.sigmoid)
             self.hiddenLayers.append(layer)
 
         #Output layer
         h_p  = self.hiddenLayers[self.L-1].h
         N_h_p = n_hl[self.L-1]
-        W = initParamsFun["W_ol"](N_h_p, N_y)
-        b = initParamsFun["b_ol"](N_y)
+        W = initP["W_ol"](rng, N_h_p, N_y, o)
+        b = initP["b_ol"](N_y)
         self.params.append(W)
         self.params.append(b)
-        self.outputLayer = OutputLayer(h_p, N_h_p, N_y, W, b, OutputLayer.softmax)
+        self.outputLayer = \
+            OutputLayer(h_p, N_h_p, N_y, W, b, o)
         self.f = self.outputLayer.f
 
         #y_pred, cost, errors, params
         self.y_pred =  T.argmax(self.f, axis=1)
         self.cost   = -T.mean(T.log(self.f)[T.arange(y.shape[0]), y])
+        #self.cost = T.sum( T.pow(self.f - y, 2))
         self.errors =  T.sum(T.neq(self.y_pred, y))
 
-    def compileFunctions (self, dataset, ibatch, batch_size, learning_rate):
+    def compileFunctions (self, dataset, ib, B, K):
         train_set_x = dataset["train"]["X"]
         train_set_y = dataset["train"]["Y"]
         valid_set_x = dataset["valid"]["X"]
@@ -113,35 +113,35 @@ class NNBP(object):
 
         gparams = [T.grad(self.cost, param) for param in self.params]
         updates = [
-            (param, param - learning_rate * gparam)
+            (param, param - K * gparam)
             for param, gparam in zip(self.params, gparams)
         ]
 
         fun_train = theano.function(
-            inputs=[ibatch],
+            inputs=[ib],
             outputs=self.cost,
             updates=updates,
             givens={
-                self.x: train_set_x[ibatch * batch_size: (ibatch + 1) * batch_size],
-                self.y: train_set_y[ibatch * batch_size: (ibatch + 1) * batch_size]
+                self.x: train_set_x[ib * B: (ib + 1) * B],
+                self.y: train_set_y[ib * B: (ib + 1) * B]
             }
         )
 
         fun_validate = theano.function(
-            inputs=[ibatch],
+            inputs=[ib],
             outputs=self.errors,
             givens={
-                self.x: valid_set_x[ibatch * batch_size:(ibatch + 1) * batch_size],
-                self.y: valid_set_y[ibatch * batch_size:(ibatch + 1) * batch_size]
+                self.x: valid_set_x[ib * B:(ib + 1) * B],
+                self.y: valid_set_y[ib * B:(ib + 1) * B]
             }
         )
 
         fun_test = theano.function(
-            inputs=[ibatch],
+            inputs=[ib],
             outputs=(self.errors, self.y_pred),
             givens={
-                self.x: test_set_x[ibatch * batch_size:(ibatch + 1) * batch_size],
-                self.y: test_set_y[ibatch * batch_size:(ibatch + 1) * batch_size]
+                self.x: test_set_x[ib * B:(ib + 1) * B],
+                self.y: test_set_y[ib * B:(ib + 1) * B]
             }
         )
 

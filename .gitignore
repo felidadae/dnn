@@ -1,5 +1,13 @@
 *.pyc
 __results/*
+__utils/*
+
+__documentation/*
+!__documentation/*.pdf
+!__documentation/*.tex
+
+
+
 *.png
 *.gz
 *.ipynb

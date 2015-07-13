@@ -108,7 +108,7 @@ def nnbp__learn_earlystopping(experiment_path, meta_params, dataset_info):
     #pickle results
     pickleResultsGen(experiment_path + "/" + "infoPickled", [dataset_info, meta_params])
     nnmp_params_numpy = []
-    for i in xrange(nnbp_ml.L+1):
+    for i in xrange(len(nnbp_ml.params)):
         nnmp_params_numpy.append (nnbp_ml.params[i].get_value(borrow=True))
     results = {"costs_test": costs_test,
                "errors_valid": errors_valid,

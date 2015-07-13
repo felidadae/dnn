@@ -8,7 +8,9 @@ import gzip
 import os
 
 
-
+def prepareExamplesAsShared(examples, borrow=True):
+    shared_examples = theano.shared(numpy.asarray(examples, dtype=theano.config.floatX), borrow=True)
+    return shared_examples
 
 def mnist_load(ifTheanoTensorShared = True):
     """

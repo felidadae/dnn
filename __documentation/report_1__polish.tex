@@ -1,0 +1,368 @@
+\documentclass[fleqn]{scrartcl}
+\usepackage{graphicx}
+\usepackage{polski}
+\usepackage[utf8]{inputenc}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage[]{algorithm2e}
+\usepackage[top=0.3in, bottom=0.8in, left=0.8in, right=0.8in, a4paper]{geometry}
+\newcommand\numberthis{\addtocounter{equation}{1}\tag{\theequation}}
+
+%\usepackage{color}
+%\color{white}
+%\pagecolor{black}
+
+
+
+
+
+\begin{document}
+
+\title{Głębokie sieci neuronowe.}
+\subtitle{Sprawozdanie z pracowni problemowej magisterskiej (PPMGR(A)).}
+\author{autor: Szymon Bugaj \\promotor: prof. Andrzej Pacut}
+
+\maketitle
+
+\begin{abstract}
+Zestaw stosowy auto-enkoderów odszumiających (ang. stacked denoising autoencoders) uczony do problemu klasyfikacjia na zbiorze cyfr pisanych odręcznie (MNIST \cite{cite:MNIST}). Wpływ składu zbioru uczącego fazy pretreningu na rezultaty klasyfikacji.    
+\end{abstract}
+
+\tableofcontents
+
+
+
+
+
+
+\section{Głęboki autoenkoder odszumiający}
+Stworzyłem implementację zestawu stosowego auto-enkoderów odszumiających (ang. stacked denoising autoencoder) zgodnie z dokumentem ~\cite{cite:sda} korzystając z biblioteki Theano~\cite{cite:Theano} (pythonowa biblioteka, której najważniejszą cechą jest możliwość transparentnego użycia na karcie graficznej - w trybie GPU wykorzystywać może bibliotekę cuDNN~\cite{cite:cuDNN}).
+
+Pod terminem głębokiego autoenkodera kryje się sieć o topologii perceptronu wielowarstwowego, którego wagi inicjowane są z wykorzystaniem auto-enkoderów (w fazie tej niewykorzystywana jest informacja o przynależności obiektów do klas - jest to uczenie nienadzorowane). Faza ta nazywana jest fazą pretreningu (ang. pretrening). Po tej fazie następuje standardowe uczenie perceptronu wielowarstwowego i nazywane jest w tym kontekście fazą strojenia (ang. fine-tuning).
+
+Autoenkoder to również sieć o topologii perceptronu wielowarstwowego. Uczony jest w trybie nienadzorowanym - niewykorzystywana jest informacja o przynależności obiektów do klas, jeżeli takowa jest dostępna. Liczba elementów w warstwie wejściowej równa jest liczbie neuronów w warstwie wyjściowej oraz funkcja kosztu dobrana jest w ten sposób, by sieć uczyła się replikować na wyjściu zbiór wejściowy. Celem tego jest ekstrakcja cech w zbiorze wejściowym.
+
+Do uczenia sieci zarówno w fazie pretreningu (ang. pretrening) jak i w fazie dostrajania (ang. fine-tuning) wykorzystałem metodę stochastycznego lub zbiorczego spadku gradientu (ang. stochastic gradient descent).
+
+
+\subsection{Metoda stochastycznego spadku gradientu}
+Metodę stochastycznego spadku gradientu opisana jest równianiami:
+\begin{itemize}
+    \item  \ref{eq:sgd1} i \ref{eq:sgd2}  - uczenie nadzorowane (faza dostrajania),
+    \item  \ref{eq:sgd1b} i \ref{eq:sgd2} - uczenie nienadzorowane dla autoenkodera (faza pretreningu).
+\end{itemize}
+
+Przyjęte zostały oznaczenia:
+\begin{itemize}
+    \item $x^{t}$ - pojedynczy element ze zbioru wejściowego,
+    \item $y^{t}$ - etykieta reprezentująca klasę elementu ze zbioru wejściowego w przypadku uczenia nadzorowanego,
+    \item $\theta$ - zbiór wszystkich parametrów sieci (wagi połączeń między elementami w sieci),
+    \item $l$ - funkcja kosztu, porównująca wyjście sieci ($f(x^{t})$) z oczekiwaną wartością, malejąca wraz z zmniejszaniem się rozbieżności między tymi dwoma wartościami, 
+    \item $\Omega$ - funkcja, której zadaniem jest wymuszenie zadanego rozkładu parametrów sieci (np. równomierny rozkład wartości parametrów), nazywana regularyzatorem,
+    \item $\lambda$ - stała, waga przypisana regularyzatorowi, 
+    \item $\alpha$ - stała, krok uczenia.
+\end{itemize}
+
+\begin{align*}
+    &\Delta = - \nabla_{\theta} l(f(x^{(t)}); \theta ),  
+        y^{(t)}) - \nabla_{\theta}  \lambda \Omega(\theta ) \numberthis \label{eq:sgd1}\\
+    &\Delta = - \nabla_{\theta} l(f(x^{(t)}); \theta ),  
+        x^{(t)}) - \nabla_{\theta}  \lambda \Omega(\theta ) \numberthis \label{eq:sgd1b}\\
+    &\theta \leftarrow  \theta + \alpha \Delta          \numberthis \label{eq:sgd2}
+\end{align*}
+
+
+
+\subsection{Wejściowe zbiory danych}
+Wyodrębnić należy 4 zbiory danych, wykorzystane w procesie uczenia i testowania sieci:
+\begin{itemize}
+    \item zbiór uczący fazy pretreningu,
+    \item zbiór uczący fazy dostrajania (musi być etykietowany),
+    \item zbiór walidacyjny fazy dostrajania (musi być etykietowany),
+    \item zbiór testowy (musi być etykietowany).
+\end{itemize}
+
+Zbiór testowy i walidacyjny fazy dostrajania powinny być rozłączne z innymi zbiorami danych. Zbiór uczący fazy pretreningu jako, że wykorzystane jest w tej fazie uczenie nienadzorowane, może być zbiorem nieetykietowanym.
+
+
+\subsection{Losowanie początkowych parametrów sieci}
+Przed fazą losowane są parametry początkowe sieci.
+Przyjąłem następującą metodę wyboru początkowych wartości:
+\begin{itemize}
+    \item wyrazy wolne (ang. bias) są inicjowane 0,
+    \item wagi połączeń między neuronami losowane były z rozkładem jednostajnym z przedziału 
+    \begin{align*}
+        &(-\sqrt{6 / (N_{h^{k-1}} + N_{h^{k}})}, \sqrt{6 / (N_{h^{k-1}} + N_{h^{k}})}) \\
+    \end{align*}
+\end{itemize} 
+
+
+\subsection{Pretrening}
+Autoenkodery odszumiające z jedną warstwą ukrytą zostały użyte do inicjacji parametrów warstw ukrytych sieci. Tj. pojedynczy autoenkoder inicjował jedną warstwę ukrytę.
+Uczenie odbywało się w sposób zachłanny, niezależnie dla kolejnych sąsiadujących warstw poczynając od tej sąsiadującej z warstwą wejściową. Wejściem dla każdego autoenkodera było wyjście z poprzedniej warstwy uprzednio zainicjowanej. Wejściem dla pierwszego autoenkodera stanowił zbiór uczący fazy pretreningu.
+
+Rozpatrzmy przykładową sieć: 784-500-500-500-10 (liczność kolejnych warstw sieci począwszy od wejściowej). Na początku losowane są parametry początkowe sieci. Następnie odbywa się faza pretreningu. 
+
+Uczona jest pierwsza warstwa ukryta. Tworzony jest autoenkoder 784-500-784 i jego wejściem jest zbiór wejściowy fazy pretreningu, a macierz wag warstwy ukrytej to macierz z głębokiej sieci, na której odbywa się pretrening.
+
+Po zakończeniu uczenia tworzony jest autoenkoder mający uczyć drugą warstwę ukrytą. Liczność warstw wynosi 500-500-500. Wejściem autoenkodera stanowi wyjście z pierwszej warstwy ukrytej policzone już po uczenie tej warstwy w fazie pretreningu. 
+
+Tak samo się dzieje dla trzeciej warstwy ukrytej. Warstwa wyjściowa nie jest uczona w fazie pretreningu.
+
+\subsubsection{Autoenkoder odszumiający}
+Funkcja kosztu dla autoenkodera jest zdefiniowany, by wyjście autoenkodera stanowiło replikę wejścia. Ostatecznym problemem do rozwiązania jest klasyfikacja nowych elementów, jaki jest więc sens wykorzystania autoenkodera? Celem jest ekstrakcja charakterystycznych cech w zbiorze uczącym, tak by parametry sieci ograniczyć do rozpatrywanej podprzestrzeni problemu. 
+
+W dalszej części podrozdziału przedstawiam rozważania dla pojedynczego autoenkodera użytego do uczenia pojedynczej warstwy ukrytej głębokiej sieci neuronowej. 
+
+Autoenkodery zawierały jedną warstwę ukrytą.
+
+Przyjąłem oznaczenia:
+\begin{itemize}
+  \item $x$ - zbiór wejściowy autoenkodera i $N_{x}$ jego liczność,
+  \item $N_{D}$ - liczba cech dla elementów zbioru wejściowego, 
+  \item $\widetilde{x}$ - zaszumiony zbiór wejściowy,
+  \item $h$ - wyjście z warstwy ukrytej (funkcje przekształcające zaszumiony zbiór wejściowy w wyjście warstwy ukryteh),
+  \item $\hat{x}$ - wyjście z wartswy wyjściowej, zrekonstruowane wejście (funkcja przekształcająca zaszumiony zbiór wejściowy w wyjście warstwy wyjściowej),
+  \item $W, W^{*}$ - zbiór połączeń odpowiednio dla warstwy ukrytej i wyjściowej.
+  \item $l$ - funkcja kosztu.
+\end{itemize}
+
+Zaszumienie zbioru wejściowego autoenkodera polepsza rezultaty autoenkodera w wyżej wymienionym zadaniu i polegało na jego losowej modyfikacji - dla każdego wektora wejściowego i dla każdego elementu tego wektora (cechy) losowano z zadanym stałym prawdopodobieństwem czy wartość ma zostać zmodyfikowana na 0. 
+
+Dla pierwszej warstwy ukrytej autoenkodera głębokiego oznaczało to modyfikację obrazów wejściowych poprzez zmianę losowych pikseli na czarne, dla drugiej modyfikację wyjścia z warstwy pierwszej poprzez zmianę wyjść losowo wybranych neuronów na 0.
+
+Przy przyjętych oznaczeniach metodę zaszumienia można zapisać następująco:
+
+\begin{algorithm}[H]
+     \ForEach{$i$ in $N_{x}$}
+     {
+         \ForEach{$d$ in $N_{D}$}
+         {
+             \eIf{random\_binomial (corrupt)}
+             {
+                 $\widetilde{x}^{i}_{d} = 0$\;
+             }
+             {
+                 $\widetilde{x}^{i}_{d} = x^{i}_{d}$
+             }
+         }
+     }
+\end{algorithm}
+
+Za funkcję aktywacji dla warstwy ukrytej jak i dla warstwy wyjściowej przyjęłem funkcję sigmoidalną ($sigmoid$).
+
+Poniższe wzory przedstawiają rachunek macierzowy. Przykłady ułożone są w wierszach, a kolumny reprezentują cechy (odpowiednie piksele obrazka) w macierzy $x$.
+
+\begin{align*}
+	&h(x) = sigmoid(\widetilde{x}*W+b) 		\numberthis \label{eq:1}\\
+	&\hat{x}(x) = sigmoid(h(x)*W^{*}+c) \numberthis \label{eq:2}\\
+\end{align*}
+
+Dla warstwy wyjściowej macierz wag stanowi transpozycję macierzy wag warstwy ukrytej (ang. tied weights).
+\begin{align*}
+	&W^{*} = W^{T}						\numberthis \label{eq:3}
+\end{align*}
+
+Użyłem funkcję kosztu postaci \cite{cite:ae_cost}:
+\begin{align*}
+	&l(f(x))=-\sum_{k} (x_{k}log(\hat{x}_{k})+(1-x_{k})log(1-\hat{x}_{k})) \numberthis \label{eq:3}
+\end{align*}
+
+Należy zaznaczyć, iż w powyższym równaniu porównywane są wartości:
+\begin{itemize}
+  \item $x$ - oryginalny zbiór wejściowy autoenkodera (bez szumu),
+  \item $\hat{x}(x)$ - zrekonstruowany zbiór wejściowy (wyjście neuronów w warstwie ukrytej autoenkodera).
+\end{itemize}
+
+Uczenie odbywa się na zbiorze uczącym fazy pretreningu i kończone jest po zadanej liczbie epok.
+
+
+
+
+
+\subsection{Strojenie}
+Po etapie pretreningu, dla uzyskanych wartości połączeń dla warstw ukrytych odbywa się standardowe uczenie perceptronu wielowarstwowego. 
+
+Przyjąłem oznaczenia:
+\begin{itemize}
+  \item $g$ - funkcja aktywacji dla warstwy ukrytej,
+  \item $o$ - funkcja aktywacji dla warstwy wyjściowej,
+  \item $l$ - funkcja kary,
+  \item $h^{i}$ - funkcja transformująca zbiór wejściowy w wyjście dla i-tej warstwy ukrytej,
+  \item $f(x) = h^{L+1}(x)$
+  \item $x,y$ - zbiór wejściowy i zbiór etykiet określających prawidłową klasę,
+  \item $L$ - liczba warstw ukrytych,
+  \item $W^{i}$ - macierz wag połączeń między neuronami między warstwą $i-1$ 
+      (dla $i=0$ otrzymujemy warstwę wejściową) a warstwą $i$ ($i = 1,2 ...
+      L+1$),
+  \item $b^{i}$ - wektor wag połączeń między neuronami z warstwy $i$ a wyrazem 
+      wolnym z warstwy $i-1$
+\end{itemize}
+
+Poniższe wzory przedstawiają rachunek macierzowy. Przykłady ułożone są w wierszach, a kolumny reprezentują cechy (odpowiednie piksele obrazka) w macierzy $x$ (by mnożenie macierzy miało sens, każda kolumna w macierzy połączeń $W^{i}$ zawierać musi wagi połączeń wszystkich neuronów z warstwy $i-1$ z pojedynczym neuronem warstwy $i$)
+
+\begin{align*}
+    &h^{k+1}(x) = g(h^{k}(x)*W^{k}+b^{k})    \\
+    &h^{0}(x) = x                            \\
+    &h^{L+1}(x) = o(h^{k}(x)*W^{k}+b^{k})
+\end{align*}
+
+W modelu przyjęto funkcje:
+\begin{align*}
+    &softmax(a_{k}) = \frac {e^{a_{k}}} {\sum_{i} e^{a_{i}}}, a = [a_{1}, a_{2}, ...] \\
+    &sigmoid(a) = \frac{1}{1+e^{-a}}        \\
+	&g(a) = sigmoid(a)						\\
+	&o(a) = softmax(a)						\\
+	&l(f(x), y)= -log f(x)_{y},  f(x) = [f(x)_{1}, f(x)_{2}, ...]\numberthis \label{eq:3}
+\end{align*}
+
+By zapobiec zjawisku nadmiernego dopasowania po każdej epoce zbioru uczącego fazy dostrajania model sprawdzany jest na zbiorze walidacyjnym fazy dostrajania.
+
+Jeżeli przez zadaną liczbę epok (oznaczany dalej symbolem $P_{fine-tuning}$)  model nie poprawia najlepszego dotychczasowego rezultatu na zbiorze walidacyjnym optymalizacja jest zakończana, a rezultatem jest model, który uzyskał najlepszy wynik na tymże zbiorze. Następnie model ten jest sprawdzany na zbiorze testowym.
+
+
+
+
+
+
+\section{Testy}
+Możliwości klasyfikacyjne sieci testowane były na zbiorze cyfr pisanych MNIST~\cite{cite:MNIST} o wielkości 10000 elementów, który to był rozłączny z wszystkimi innymi zbiorami danych wykorzystanych w procesie uczenia. 
+
+Zbiór uczący fazy dostrajania miał 50000 elementów, a zbiór walidacyjny fazy dostrajania 10000 elementów. Wszystkie trzy wspomniane zbiory zawierały dane wyłącznie ze zbioru MNIST, czyli były to dane zawierające cyfry i były etykietowane.
+
+W części uruchomień faza pretreningu była pominięta.
+Oczywiście w takim przypadku mamy do czynienia ze standardowym uczeniem perceptronu wielowarstwowego.
+
+\subsection{Warianty składu zbioru uczącego fazy pretreningu}
+W testach uwzględnione zostały następujące warianty składu zbioru uczącego fazy pretreningu:
+
+
+\begin{itemize}
+    \item pretrening na zbiorze uczącym fazy dostrajania (50 000 cyfr z MNIST),
+    \item pretrening na zbiorze uczącym fazy dostrajania rozszerzonym o zbiór liter (50 000 cyfr z MNIST + 120 000 liter z NIST~\cite{cite:NIST}, czyli 170 000 przykładów),
+    \item pretrening wyłącznie na zbiorze liter (50 000 liter z NIST).
+\end{itemize}
+
+Zbiór liter został przetworzony w sposób odpowiadający opisowi sposobu przetworzenia zbioru cyfr użytych do konstrukcji zbioru MNIST, tj. 
+\begin{itemize}
+    \item odwrócenie kolorów,
+    \item skadrowanie obrazka do najmniejszego prostokąta zawierającego znak,
+    \item zmniejszenie obrazka, tak by dłuższy bok miał 20 pikseli,
+    \item rozszerzenie wielkości obrazka do 28x28pikseli,
+    \item normalizacja wartości jasności pikseli do zakresu 0..1.
+\end{itemize}
+
+Pominięty został krok translacji obrazka by tak na środku obrazka znajdował się środek ciężkości obrazka otrzymanego po etapie zmniejszania rozmiaru. 
+
+Stworzony został zbiór 120 000 liter.
+
+\begin{figure}[h!]
+  \caption{Zbiór uczący fazy pretreningu zawierający zarówno literki jak i cyfry.}
+  \centering
+    \includegraphics[width=12cm]{zbior.png}
+\end{figure}
+
+
+
+\subsection{Metaparametry}
+Wszystkie testy zostały przeprowadzone na sieci o liczności warstw $784 -500-500-500- 10$ (dobrane zostały w testach nie zamieszczonych w tym sprawozdaniu).
+
+Niżej wymienione są wszystkie metaparametry przyjęte w testach:
+\begin{itemize}
+    
+    \item początkowe wagi neuronów dla $k$ warstwy ukrytej losowane były z rozkładem jednostajnym z przedziału 
+        $(-\sqrt{6 / (N_{h^{k-1}} + N_{h^{k}})}, \sqrt{6 / (N_{h^{k-1}} + N_{h^{k}})})$, 
+        a wyrazy wolne inicjowane $0$.
+    
+    \item autoenkoder, faza pretreningu:
+        \begin{itemize}
+            \item $g(a) = sigmoid(a)$,  
+            \item $o(a) = sigmoid(a)$,
+            \item $W^{*} = W^{T}$,
+            \item $l(f(x))=-\sum_{k}, 
+                (x_{k}log(\hat{x}_{k})+(1-x_{k})log(1-\hat{x}_{k}))$,
+            \item $corrupt = [0.3,0.3,0.3]$ - prawdopodobieństwo 
+                zaszumienia dla autoenkoderów dla kolejnych warstw,
+            \item do uczenia zastosowano metodę stochastycznego spadku gradientu,
+            \item $\alpha_{pretrain} = 0.01$ - 
+                krok dla metody gradientowej,
+            \item uczenie kończone po 15 epokach.
+            
+        \end{itemize}
+    \item głęboki autoenkoder, faza strojenia
+        \begin{itemize}
+            \item $g(a) = sigmoid(a)$, 
+            \item $o(a) = softmax(a)$,
+            \item $l(f(x), y)= -log f(x)_{y}$,
+            \item do uczenia zastosowano metodę stochastycznego spadku gradientu,  
+            \item $\alpha_{finetuning} = 0.01$ - krok dla 
+                metody gradientowej,  
+            \item $P_{fine-tuning} = 10$ - uczenie kończone, 
+                gdy przez 10 iteracji nie ma poprawy najlepszego 
+                wyniku na zbiorze walidacyjnym.
+            
+        \end{itemize}
+\end{itemize}
+
+
+\subsection{Wpływ pretreningu na głęboką sieć neuronową}
+Dla każdego zestawienia metaparametrów wykonane zostało 10 uruchomień. Następnie policzony średni czas uczenia, średni błąd klasyfikacji, odchylenie średniokwadratowe dla błędów klasyfikacji, minimalny błąd klasyfikacji. Tabela \ref{table:results} zawiera wyniki.
+
+\begin {table}
+\title{Wpływ zb}
+\begin{center}
+\begin{tabular}{cc|ccc|c}
+    \hline
+    Liczba cyfr & Liczba liter    & $avg$     & $std$     & $min$      & $t_{avg}[m]$   \\
+    \hline
+    $0$ &    $0$           & $1.86\%$  & $0.06\%$  & $1.77\%$  &      $47$                    \\
+    $50k$ & $0$            & $1.55\%$  & $0.05\%$  & $1.48\%$  &      $66$              \\
+    $0$   & $50k$            & $1.58\%$  & $0.08\%$  & $1.41\%$  &      $65$             \\
+    $50k$ & $120k$           & $1.59\%$  & $0.045\%$ & $1.56\%$  &    $132$  \\
+
+\end{tabular}
+\caption {Jakość klasyfikacji i czasy uczenia dla zestawu stosowego auto-enkoderów odszumiających z trzema warstwami ukrytymi $784 -500-500-500- 10$. Dla każdego wariantu wykonano 10 uruchomień. Implementację stworzona z wykorzystaniem biblioteki Theano i uruchomiono na czterordzeniowym CPU Intel Core i7.}
+\label{table:results}
+\end{center}
+\end {table}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\begin{thebibliography}{99}
+
+\bibitem{cite:sda1} Bengio, P. Lamblin, D. Popovici and H. Larochelle, Greedy Layer-Wise Training of Deep Networks, in Advances in Neural Information Processing Systems 19 (NIPS‘06), pages 153-160, MIT Press 2007.
+
+\bibitem{cite:sda} Vincent, H. Larochelle Y. Bengio and P.A. Manzagol, Extracting and Composing Robust Features with Denoising Autoencoders, Proceedings of the Twenty-fifth International Conference on Machine Learning (ICML‘08), pages 1096 - 1103, ACM, 2008.
+
+\bibitem{cite:dnn} Hugo Larochelle http://info.usherbrooke.ca/hlarochelle/
+
+\bibitem{cite:MNIST} The MNIST database of handwritten digits, Yann LeCun, Corinna Cortes, Christopher J.C. Burges, http://yann.lecun.com/exdb/mnist/
+
+\bibitem{cite:NIST} NIST Special Database 19, http://www.nist.gov/srd/nistsd19.cfm
+
+\bibitem{cite:Theano} Biblioteka Theano, http://deeplearning.net/software/theano/
+
+\bibitem{cite:cuDNN} NVIDIA® cuDNN – GPU Accelerated Deep Learning library, https://developer.nvidia.com/cuDNN
+
+
+
+
+\end{thebibliography}
+
+\end{document}
+
+%\lstinputlisting[language=Python, firstline=37, %lastline=45]{LittleTrees.py}

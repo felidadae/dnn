@@ -8,4 +8,4 @@ Current state of the project:
 - stacked autoencoders (each layer pretrained with autoencoder, after pretraining standard back-propagation)
 - code to visualise results and make experiments
 
-Code lacks documentation which will be solved in the nearest future.
+For more description check folder >>documentation<<

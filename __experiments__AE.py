@@ -98,7 +98,7 @@ def ae__learn(experiment_path, meta_params, dataset_info):
 def ae__results(experiment_path):
     dataset  = mnist_load(ifTheanoTensorShared=False)
     meta_params, results  = unpickleResultsGen(experiment_path + "/resultsPickled")
-    cost           = results["cost"]
+    cost           = results["costs"]
     x_r_final       = results["x_r_final"]
     ae_params_numpy = results["ae_params_numpy"]
     W_hl,b_hl = ae_params_numpy

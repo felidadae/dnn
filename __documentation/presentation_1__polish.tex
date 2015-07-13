@@ -1,0 +1,336 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Beamer Presentation
+% LaTeX Template
+% Version 1.0 (10/11/12)
+%
+% This template has been downloaded from:
+% http://www.LaTeXTemplates.com
+%
+% License:
+% CC BY-NC-SA 3.0 (http://creativecommons.org/licenses/by-nc-sa/3.0/)
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%----------------------------------------------------------------------------------------
+%	PACKAGES AND THEMES
+%----------------------------------------------------------------------------------------
+
+\documentclass{beamer}
+
+\mode<presentation> {
+
+% The Beamer class comes with a number of default slide themes
+% which change the colors and layouts of slides. Below this is a list
+% of all the themes, uncomment each in turn to see what they look like.
+
+%\usetheme{default}
+%\usetheme{AnnArbor}
+%\usetheme{Antibes}
+%\usetheme{Bergen}
+%\usetheme{Berkeley}
+%\usetheme{Berlin}
+%\usetheme{Boadilla}
+%\usetheme{CambridgeUS}
+%\usetheme{Copenhagen}
+%\usetheme{Darmstadt}
+%\usetheme{Dresden}
+%\usetheme{Frankfurt}
+%\usetheme{Goettingen}
+%\usetheme{Hannover}
+%\usetheme{Ilmenau}
+%\usetheme{JuanLesPins}
+%\usetheme{Luebeck}
+\usetheme{Madrid}
+%\usetheme{Malmoe}
+%\usetheme{Marburg}
+%\usetheme{Montpellier}
+%\usetheme{PaloAlto}
+%\usetheme{Pittsburgh}
+%\usetheme{Rochester}
+%\usetheme{Singapore}
+%\usetheme{Szeged}
+%\usetheme{Warsaw}
+
+% As well as themes, the Beamer class has a number of color themes
+% for any slide theme. Uncomment each of these in turn to see how it
+% changes the colors of your current slide theme.
+
+%\usecolortheme{albatross}
+%\usecolortheme{beaver}
+%\usecolortheme{beetle}
+%\usecolortheme{crane}
+%\usecolortheme{dolphin}
+%\usecolortheme{dove}
+%\usecolortheme{fly}
+%\usecolortheme{lily}
+%\usecolortheme{orchid}
+%\usecolortheme{rose}
+%\usecolortheme{seagull}
+%\usecolortheme{seahorse}
+%\usecolortheme{whale}
+\usecolortheme{wolverine}
+
+%\setbeamertemplate{footline} % To remove the footer line in all slides uncomment this line
+%\setbeamertemplate{footline}[page number] % To replace the footer line in all slides with a simple slide count uncomment this line
+
+%\setbeamertemplate{navigation symbols}{} % To remove the navigation symbols from the bottom of all slides uncomment this line
+}
+
+\usepackage{graphicx} % Allows including images
+\usepackage{booktabs} % Allows the use of \toprule, \midrule and \bottomrule in tables
+\usepackage{polski}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage[]{algorithm2e}
+\newcommand\numberthis{\addtocounter{equation}{1}\tag{\theequation}}
+
+%----------------------------------------------------------------------------------------
+%	TITLE PAGE
+%----------------------------------------------------------------------------------------
+
+\title[Głębokie sieci neuronowe]{Głębokie sieci neuronowe. Zestaw stosowy auto-enkoderów odszumiających (ang. stacked denoising autoencoders) uczony do problemu klasyfikacjia na zbiorze cyfr pisanych odręcznie (MNIST). Wpływ wyboru zbioru uczącego fazy pretreningu na rezultaty klasyfikacji.} % The short title appears at the bottom of every slide, the full title is only on the title page
+
+\author[]{Szymon Bugaj \\promotor: prof. Andrzej Pacut} % Your name
+\institute[] % Your institution as it will appear on the bottom of every slide, may be shorthand to save space
+{
+Politechnika Warszawska, Wydział Elektroniki i Technik Informacyjnych \\ % Your institution for the title page
+\medskip
+\textit{s.bugaj@mion.elka.pw.edu.pl} % Your email address
+}
+\date{\today} % Date, can be changed to a custom date
+
+\begin{document}
+
+\begin{frame}
+\titlepage % Print the title page as the first slide
+\end{frame}
+
+
+%----------------------------------------------------------------------------------------
+%	PRESENTATION SLIDES
+%----------------------------------------------------------------------------------------
+
+
+\begin{frame}
+\frametitle{Wejściowe zbiory danych}
+
+Wyodrębnić należy 4 zbiory danych, wykorzystane w procesie uczenia i testowania zestawu stosowego auto-enkoderów odszumiających:
+\begin{itemize}
+    \item zbiór uczący fazy pretreningu,
+    \item zbiór uczący fazy dostrajania (musi być etykietowany),
+    \item zbiór walidacyjny fazy dostrajania (musi być etykietowany),
+    \item zbiór testowy (musi być etykietowany).
+\end{itemize}
+
+\end{frame}
+
+%------------------------------------------------
+
+\begin{frame}
+\frametitle{Warianty fazy pretreningu}
+W testach uwzględnione zostały następujące warianty składu zbioru uczącego fazy pretreningu:
+
+\begin{itemize}
+    \item pretrening na zbiorze uczącym fazy dostrajania (50 000 cyfr z MNIST),
+    \item pretrening na zbiorze uczącym fazy dostrajania (50 000 cyfr z MNIST + 120 000 liter z NIST, czyli 170 000 przykładów),
+    \item pretrening wyłącznie na zbiorze liter (50 000 liter z NIST).
+\end{itemize}
+
+
+
+\end{frame}
+
+%------------------------------------------------
+
+\begin{frame}
+\frametitle{Zbiór danych (litery + cyfry)}
+\begin{center}
+\includegraphics[width=8cm]{zbior.png}
+\end{center}
+
+\end{frame}
+
+%------------------------------------------------
+
+
+\begin{frame}
+\frametitle{Zestaw stosowy auto-enkoderów odszumiających (ang. stacked denoising autoencoders)}
+
+\begin{itemize}
+    \item faza pretreningu (ang. pretrening)
+        \begin{itemize}
+            \item podejście zachłanne, niezależnie dla każdej warstwy, 
+            \item zbiór wejściowy dla auto-enkodera trenującego $i$ warstwę ukrytą
+                stanowiło wyjście z $i-1$ warstwy ukrytej, dla której faza pretreningu
+                już się odbyła,
+            \item każda warstwa uczona jest przez 15 epok
+        \end{itemize}
+    \item faza strojenia (ang. fine-tuning) - standardowe uczenie
+        \begin{itemize}
+            \item zakończane, gdy brak polepszenie najlepszego 
+                wyniku na zbiorze walidacyjnym przez 10 epok
+        \end{itemize}
+    
+    Model z najlepszym wynikiem walidacyjnym testowany jest na zbiorze testowym.
+        
+\end{itemize}
+
+\end{frame}
+
+%------------------------------------------------
+
+\begin{frame}
+\frametitle{Metoda doboru początkowych parametrów sieci}
+
+\begin{itemize}
+    \item wyrazy wolne - przypisanie $0$
+    \item wagi połączeń pomiędzy neuronami:
+    \begin{align*}
+    	(-\sqrt{6 / (N_{h^{k-1}} + N_{h^{k}})}, \sqrt{6 / (N_{h^{k-1}} + N_{h^{k}})})
+    \end{align*}
+     
+\end{itemize}
+
+\end{frame}
+
+%------------------------------------------------
+
+\begin{frame}
+\frametitle{Auto-enkoder odszumiający}
+\begin{itemize}
+    
+\item architektura
+\begin{align*}
+	&h(x) = sigmoid(\widetilde{x}*W+b) 		\numberthis \label{eq:1}\\
+	&\hat{x}(x) = sigmoid(h(x)*W^{T}+c) \numberthis \label{eq:2}\\
+\end{align*}
+
+    
+\item uczenie, metoda stochastycznego spadku gradientu
+\begin{align*}
+&\Delta = - \nabla_{\theta} l(f(x^{i}); \theta ), x^{i}) \\
+&\theta \leftarrow  \theta + 0.01 \Delta   
+\end{align*}
+
+\item funkcja kary (suma entropii krzyżowych Bernoulliego, ang. sum of Bernoulli cross-entropies )
+\begin{align*}
+&l(f(x))=-\sum_{k} (x_{k}log(\hat{x}_{k})+(1-x_{k})log(1-\hat{x}_{k}))   
+\end{align*}
+
+\end{itemize}
+
+\end{frame}
+
+%------------------------------------------------
+
+\begin{frame}
+\frametitle{Auto-enkoder odszumiający}
+\begin{itemize}
+    
+\item zaszumienie zbioru wejściowego
+\begin{algorithm}[H]
+     \ForEach{$i$ in $N_{x}$}
+     {
+         \ForEach{$d$ in $N_{Dim}$}
+         {
+             \eIf{random\_binomial (corrupt)}
+             {
+                 $\widetilde{x}^{i}_{d} = 0$\;
+             }
+             {
+                 $\widetilde{x}^{i}_{d} = x^{i}_{d}$
+             }
+         }
+     }
+\end{algorithm}
+
+\end{itemize}
+
+\end{frame}
+
+%------------------------------------------------
+\begin{frame}
+\frametitle{Faza dostrajania}
+\begin{itemize}
+    \item architektura
+        \begin{itemize}
+            \item warstwy ukryte
+            \begin{align*}
+                &h^{k+1}(x) = sigmoid(h^{k}(x)*W^{k}+b^{k})
+            \end{align*}
+            \item warstwa wyjściowa
+            \begin{align*}
+                &h^{L+1}(x) = softmax(h^{L}(x)*W^{L}+b^{L})
+            \end{align*}
+        \end{itemize}
+    \item uczenie, metoda stochastycznego spadku gradientu
+        \begin{align*}
+            &\Delta = - \nabla_{\theta} l(f(x^{i}); \theta ), f^{i}) \\
+            &\theta \leftarrow  \theta + 0.01 \Delta   
+        \end{align*}
+    \item funkcja kary
+        \begin{align*}
+            &l(f(x^{i}), y^{i})= -\log f(x^{i})_{y^{i}} 
+        \end{align*}
+\end{itemize}
+
+\end{frame}
+
+%------------------------------------------------
+
+\begin{frame}
+\frametitle{Wpływ składu zbioru uczącego fazy pretreningu na jakość klasyfikacji}
+
+\begin {table}
+\title{Wpływ zb}
+\begin{center}
+\begin{tabular}{cc|ccc|c}
+    \hline
+    Liczba cyfr & Liczba liter    & $avg$     & $std$     & $min$      & $t_{avg}[m]$   \\
+    \hline
+    $0$ &    $0$           & $1.86\%$  & $0.06\%$  & $1.77\%$  &      $47$                    \\
+    $50k$ & $0$            & $1.55\%$  & $0.05\%$  & $1.48\%$  &      $66$              \\
+    $0$   & $50k$            & $1.58\%$  & $0.08\%$  & $1.41\%$  &      $65$             \\
+    $50k$ & $120k$           & $1.59\%$  & $0.045\%$ & $1.56\%$  &    $132$  \\
+
+\end{tabular}
+\caption {Jakość klasyfikacji i czasy uczenia dla zestawu stosowego auto-enkoderów odszumiających z trzema warstwami ukrytymi $784 -500-500-500- 10$. Dla każdego wariantu wykonano 10 uruchomień. Implementację stworzona z wykorzystaniem biblioteki Theano i uruchomiono na czterordzeniowym CPU Intel Core i7.}
+\label{table:5}
+\end{center}
+\end {table}
+
+\end{frame}
+
+
+%------------------------------------------------
+
+
+
+
+
+
+\begin{frame}
+\frametitle{Bibliografia}
+
+
+\begin{thebibliography}{99}
+\bibitem{cite:sda1} Bengio, P. Lamblin, D. Popovici and H. Larochelle, Greedy Layer-Wise Training of Deep Networks, in Advances in Neural Information Processing Systems 19 (NIPS‘06), pages 153-160, MIT Press 2007.
+
+\bibitem{cite:sda} Vincent, H. Larochelle Y. Bengio and P.A. Manzagol, Extracting and Composing Robust Features with Denoising Autoencoders, Proceedings of the Twenty-fifth International Conference on Machine Learning (ICML‘08), pages 1096 - 1103, ACM, 2008.
+
+\bibitem{cite:dnn} Hugo Larochelle http://info.usherbrooke.ca/hlarochelle/
+
+\bibitem{cite:MNIST} The MNIST database of handwritten digits, Yann LeCun, Corinna Cortes, Christopher J.C. Burges, http://yann.lecun.com/exdb/mnist/
+
+\bibitem{cite:Theano} Biblioteka Theano, http://deeplearning.net/software/theano/
+
+\bibitem{cite:cuDNN} NVIDIA® cuDNN – GPU Accelerated Deep Learning library, https://developer.nvidia.com/cuDNN
+\end{thebibliography}
+
+
+\end{frame}
+
+
+%-------------------------------------------------------------------------------------
+
+\end{document} 

@@ -140,8 +140,9 @@ def mnist_visualise(examples, rangeOfExamples, stringIDOfSet, pathToFile = ""):
     l,r = rangeOfExamples
     visualizeExamples( l, r, 25 )
 
-def weightsAsFilters(W, pathToFile):
-    image = Image.fromarray(tile_raster_images(X = W, img_shape=(28, 28), tile_shape=(10, 10), tile_spacing=(1, 1)))
+def weightsAsFilters(WT, pathToFile, filter_dim = (28,28), tile_y = 25):
+    N_neurons = WT.shape[0]
+    image = Image.fromarray(tile_raster_images(X = WT, img_shape=filter_dim, tile_shape=(N_neurons/tile_y, tile_y), tile_spacing=(1, 1)))
     image.save(pathToFile)
     image.show()
 
